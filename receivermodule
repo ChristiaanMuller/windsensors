@@ -1,0 +1,64 @@
+#include <esp_now.h>
+#include <WiFi.h>
+#include <Wire.h>
+
+#define CHANNEL 1 // slave channel
+esp_now_peer_info_t slave;
+const esp_now_peer_info_t *peer = &slave;
+const uint8_t peer_addr[6] = {0x30, 0xAE, 0xA4, 0x39, 0x13, 0xA4}; 
+uint8_t new_mac[8] = {0x01,0x02,0x03,0x04,0x05,0x06};
+
+struct SENSOR_DATA {
+    int acc_x;
+    int acc_y;
+};
+
+void setup() {
+  Serial.begin(115200);
+  esp_base_mac_addr_set(new_mac);
+  WiFi.mode(WIFI_AP_STA);
+  Serial.println(WiFi.macAddress()); //print macAddress  
+  esp_now_init();
+  slave.channel = CHANNEL; // pick a channel
+  slave.encrypt = 0; // no encryption
+}
+
+void loop() {
+  assignSlave();
+  esp_now_register_recv_cb(OnDataRecv);
+  delay(25); 
+}
+
+// callback when data is recv from Master
+void OnDataRecv(const uint8_t *mac_addr, const uint8_t *data, int data_len) {
+  SENSOR_DATA sd;
+  memcpy(&sd, data, sizeof(sd));
+  Serial.println(sd.acc_x);
+  //Serial.println(sd.acc_y);
+  /*
+  //assign the first 2 incoming addresses to 2 spots mac[0] and mac[1]
+  if (i < 2) {
+    mac[i] = sd.mac[5];
+    i++;
+  }
+  
+  if (sd.mac[5] == mac[0]) {
+    int ard1 = 100;
+    Serial.print(sd.acc_x);
+  }
+  
+  if (sd.mac[5] == mac[1]) {
+    int ard2 = 50;
+    //Serial.print(ard2);
+  }
+  */
+  
+}
+
+void assignSlave() {
+  memset(&slave, 0, sizeof(slave));
+      for (int i = 0; i < 6; i++) {
+        slave.peer_addr[i] = peer_addr[i]; 
+      }
+      delay(10);
+}
