@@ -1,0 +1,97 @@
+#include <esp_now.h>
+#include <WiFi.h>
+#include <Wire.h>
+#include "Filter.h"
+
+#define CHANNEL 1
+#define MPU6050_ADDR 0x68 // MPU-6050 device address
+#define MPU6050_ACCEL_CONFIG 0x1c
+#define MPU6050_SETDLPF 0x1c
+#define MPU6050 setDLPFMode 0x06
+#define PWR_MGMT_1 0x6B // waking up MPU-6050
+
+ExponentialFilter<float> FilteredTemperature(20, 0);
+ExponentialFilter<float> FilteredTemperature2(20, 0);
+
+esp_now_peer_info_t slave;
+const esp_now_peer_info_t *peer = &slave;
+const uint8_t peer_addr[6] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06}; 
+uint8_t new_mac[8] = {0x07,0x02,0x03,0x04,0x05,0x06};
+
+int16_t accData[3] = { 0, 1 }; // initialize array accelerometer 
+
+struct SENSOR_DATA {
+    int acc_x;
+    int acc_y;
+};
+
+int16_t sensorXMin = 16000;  //minimum sensor value
+int16_t sensorXMax = -16000; //maximum sensor value
+int16_t sensorYMin = 16000;  //minimum sensor value
+int16_t sensorYMax = -16000; //maximum sensor value
+
+void writeMPU6050(byte reg, byte data) {
+  Wire.beginTransmission(MPU6050_ADDR);
+  Wire.write(reg);
+  Wire.write(data);
+  Wire.endTransmission();
+}
+
+void assignSlave() {
+  memset(&slave, 0, sizeof(slave));
+      for (int i = 0; i < 6; i++) {
+        slave.peer_addr[i] = peer_addr[i]; 
+      }
+      delay(10);
+}
+
+void sendData() {
+  esp_now_add_peer(peer);
+  
+  Wire.beginTransmission(MPU6050_ADDR);
+  Wire.write(0x3B);
+  Wire.endTransmission(false);
+  Wire.requestFrom(MPU6050_ADDR, 14, true);  
+  accData[0] = Wire.read()<<8|Wire.read(); 
+  accData[1] = Wire.read()<<8|Wire.read(); 
+
+  float RawTemperature = accData[0];
+  FilteredTemperature.Filter(RawTemperature);
+  float SmoothTemperature = FilteredTemperature.Current();
+
+  float RawTemperature2 = accData[1];
+  FilteredTemperature2.Filter(RawTemperature2);
+  float SmoothTemperature2 = FilteredTemperature2.Current();
+
+  SENSOR_DATA sd;
+  sd.acc_x = map(SmoothTemperature, sensorXMin, sensorXMax, 1, 4095); // Map values to Voltage 0 - 4096
+  sd.acc_y = map(SmoothTemperature2, sensorYMin, sensorYMax, 1, 4095); // Map values to Voltage 0 - 4096
+  sd.acc_x = constrain(sd.acc_x, 0, 4095);
+  sd.acc_y = constrain(sd.acc_y, 0, 4095);
+
+  uint8_t bs[sizeof(sd)];
+  memcpy(bs, &sd, sizeof(sd));
+  esp_now_send(peer_addr,bs, sizeof(bs));
+}
+
+void setup() {
+  Serial.begin(115200);
+  esp_base_mac_addr_set(new_mac);
+  WiFi.mode(WIFI_AP_STA);
+  Serial.print("Wifi Address = ");
+  Serial.println(WiFi.macAddress()); //print macAddress  
+  esp_now_init();
+  slave.channel = CHANNEL; // pick a channel
+  slave.encrypt = 0; // no encryption
+
+  Wire.begin(14, 12);
+  writeMPU6050(PWR_MGMT_1, 0x00); // wake up MPU6050
+  writeMPU6050(MPU6050_ACCEL_CONFIG, 0x00); // accel range: Â±2g
+  writeMPU6050(MPU6050_SETDLPF, 0x06); // set Lowpass filter
+}
+
+void loop() {
+  assignSlave();
+  sendData();
+  delay(25);
+}
